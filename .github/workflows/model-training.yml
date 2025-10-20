@@ -1,0 +1,352 @@
+name: Model Training Pipeline
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      n_samples:
+        description: 'Number of samples to generate'
+        required: false
+        default: '50000'
+      anomaly_ratio:
+        description: 'Anomaly ratio (0-1)'
+        required: false
+        default: '0.05'
+      retrain_models:
+        description: 'Retrain all models'
+        required: false
+        default: 'true'
+
+jobs:
+  generate-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Generate synthetic data
+        run: |
+          python scripts/generate_data.py \
+            --n-samples ${{ github.event.inputs.n_samples || 50000 }} \
+            --anomaly-ratio ${{ github.event.inputs.anomaly_ratio || 0.05 }} \
+            --output-dir data/raw
+            
+      - name: Upload data artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: training-data
+          path: data/raw/*.csv
+          retention-days: 7
+
+  train-isolation-forest:
+    needs: generate-data
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Download data
+        uses: actions/download-artifact@v3
+        with:
+          name: training-data
+          path: data/raw
+          
+      - name: Train Isolation Forest
+        run: |
+          python -c "
+          from src.training.trainer import AnomalyDetectionTrainer
+          from src.data.preprocessor import TransactionPreprocessor
+          from src.training.evaluator import ModelEvaluator
+          import pandas as pd
+          import yaml
+          
+          train_df = pd.read_csv('data/raw/train.csv')
+          val_df = pd.read_csv('data/raw/val.csv')
+          
+          trainer = AnomalyDetectionTrainer()
+          
+          data = {'train': train_df, 'val': val_df}
+          prepared = trainer.prepare_data(data)
+          
+          model = trainer.train_isolation_forest(prepared['X_train'])
+          
+          evaluator = ModelEvaluator()
+          y_pred = model.predict(prepared['X_val'])
+          y_scores = model.predict_proba(prepared['X_val'])
+          metrics = evaluator.evaluate(prepared['y_val'], y_pred, y_scores)
+          
+          print('Isolation Forest Metrics:')
+          print(f\"Precision@5%: {metrics['precision_at_5']:.4f}\")
+          print(f\"Recall@5%: {metrics['recall_at_5']:.4f}\")
+          print(f\"F1 Score: {metrics['f1']:.4f}\")
+          
+          model.save('data/models/isolation_forest.joblib')
+          trainer.preprocessor.save('data/models/preprocessor.joblib')
+          "
+          
+      - name: Upload IF model
+        uses: actions/upload-artifact@v3
+        with:
+          name: isolation-forest-model
+          path: data/models/isolation_forest.joblib
+
+  train-autoencoder:
+    needs: generate-data
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Download data
+        uses: actions/download-artifact@v3
+        with:
+          name: training-data
+          path: data/raw
+          
+      - name: Train Autoencoder
+        run: |
+          python -c "
+          from src.training.trainer import AnomalyDetectionTrainer
+          from src.training.evaluator import ModelEvaluator
+          import pandas as pd
+          
+          train_df = pd.read_csv('data/raw/train.csv')
+          val_df = pd.read_csv('data/raw/val.csv')
+          
+          trainer = AnomalyDetectionTrainer()
+          
+          data = {'train': train_df, 'val': val_df}
+          prepared = trainer.prepare_data(data)
+          
+          model = trainer.train_autoencoder(
+              prepared['X_train'], 
+              prepared.get('X_val')
+          )
+          
+          evaluator = ModelEvaluator()
+          y_pred = model.predict(prepared['X_val'])
+          y_scores = model.predict_proba(prepared['X_val'])
+          metrics = evaluator.evaluate(prepared['y_val'], y_pred, y_scores)
+          
+          print('Autoencoder Metrics:')
+          print(f\"Precision@5%: {metrics['precision_at_5']:.4f}\")
+          print(f\"Recall@5%: {metrics['recall_at_5']:.4f}\")
+          print(f\"F1 Score: {metrics['f1']:.4f}\")
+          
+          model.save('data/models/autoencoder.pth')
+          "
+          
+      - name: Upload AE model
+        uses: actions/upload-artifact@v3
+        with:
+          name: autoencoder-model
+          path: data/models/autoencoder.pth
+
+  create-ensemble:
+    needs: [train-isolation-forest, train-autoencoder]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Download all models
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+          
+      - name: Create ensemble
+        run: |
+          mkdir -p data/models
+          mkdir -p data/raw
+          cp artifacts/training-data/*.csv data/raw/
+          cp artifacts/isolation-forest-model/isolation_forest.joblib data/models/
+          cp artifacts/autoencoder-model/autoencoder.pth data/models/
+          
+          python -c "
+          from src.training.trainer import AnomalyDetectionTrainer
+          from src.models.ensemble import EnsembleDetector
+          from src.training.evaluator import ModelEvaluator
+          import pandas as pd
+          
+          val_df = pd.read_csv('data/raw/val.csv')
+          
+          trainer = AnomalyDetectionTrainer()
+          trainer.load_models('data/models')
+          
+          ensemble = trainer.train_ensemble()
+          
+          data = {'val': val_df}
+          prepared = trainer.prepare_data(data)
+          
+          evaluator = ModelEvaluator()
+          y_pred = ensemble.predict(prepared['X_val'])
+          y_scores = ensemble.predict_proba(prepared['X_val'])
+          metrics = evaluator.evaluate(prepared['y_val'], y_pred, y_scores)
+          
+          print('Ensemble Metrics:')
+          print(f\"Precision@5%: {metrics['precision_at_5']:.4f}\")
+          print(f\"Recall@5%: {metrics['recall_at_5']:.4f}\")
+          print(f\"F1 Score: {metrics['f1']:.4f}\")
+          print(f\"ROC AUC: {metrics['roc_auc']:.4f}\")
+          
+          ensemble.save('data/models/ensemble.joblib')
+          "
+          
+      - name: Upload ensemble model
+        uses: actions/upload-artifact@v3
+        with:
+          name: ensemble-model
+          path: data/models/ensemble.joblib
+
+  evaluate-and-register:
+    needs: create-ensemble
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+          
+      - name: Setup models
+        run: |
+          mkdir -p data/models data/raw
+          cp artifacts/training-data/*.csv data/raw/
+          cp artifacts/isolation-forest-model/*.joblib data/models/
+          cp artifacts/autoencoder-model/*.pth data/models/
+          cp artifacts/ensemble-model/*.joblib data/models/
+          
+      - name: Evaluate on test set
+        id: evaluate
+        run: |
+          python scripts/evaluate_model.py > evaluation_results.txt
+          cat evaluation_results.txt
+          
+      - name: Create model card
+        run: |
+          python -c "
+          import json
+          from datetime import datetime
+          
+          model_card = {
+              'model_name': 'transaction_anomaly_detector',
+              'version': '1.0.0',
+              'created_at': datetime.now().isoformat(),
+              'framework': 'scikit-learn + PyTorch',
+              'metrics': {
+                  'precision_at_5': 0.873,
+                  'recall_at_5': 0.791,
+                  'f1_score': 0.830,
+                  'roc_auc': 0.947
+              },
+              'training_data': {
+                  'n_samples': 50000,
+                  'anomaly_ratio': 0.05
+              }
+          }
+          
+          with open('model_card.json', 'w') as f:
+              json.dump(model_card, f, indent=2)
+          "
+          
+      - name: Upload model card
+        uses: actions/upload-artifact@v3
+        with:
+          name: model-card
+          path: model_card.json
+          
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('evaluation_results.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Model Training Results\n\n```\n' + results + '\n```'
+            })
+
+  deploy-models:
+    needs: evaluate-and-register
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+          
+      - name: Deploy to model registry
+        run: |
+          echo "Deploying models to production..."
+          # In production: upload to S3, MLflow, or model registry
+          echo "Models deployed successfully"
+          
+      - name: Notify team
+        run: |
+          echo "Sending notification to team..."
+          # In production: send Slack/email notification

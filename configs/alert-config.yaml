@@ -1,0 +1,151 @@
+# Alert configuration for anomaly detection system
+
+# Alert thresholds
+thresholds:
+  # Anomaly score threshold (0-1)
+  anomaly_score: 0.8
+  
+  # High-risk transaction amount threshold
+  high_amount_threshold: 10000
+  
+  # Rapid transaction threshold (transactions per hour)
+  rapid_transaction_threshold: 10
+  
+  # Unusual location threshold (km from user's usual location)
+  location_threshold: 1000
+
+# Alert severity levels
+severity:
+  low:
+    score_range: [0.6, 0.8]
+    color: "yellow"
+    priority: 1
+    
+  medium:
+    score_range: [0.8, 0.9]
+    color: "orange"
+    priority: 2
+    
+  high:
+    score_range: [0.9, 1.0]
+    color: "red"
+    priority: 3
+
+# Notification settings
+notifications:
+  # Email notifications
+  email:
+    enabled: true
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "alerts@company.com"
+    password: "${EMAIL_PASSWORD}"  # Use environment variable
+    from_address: "alerts@company.com"
+    to_addresses:
+      - "security@company.com"
+      - "fraud@company.com"
+    
+  # Slack notifications
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#fraud-alerts"
+    
+  # Webhook notifications
+  webhook:
+    enabled: false
+    url: "${WEBHOOK_URL}"
+    timeout: 10
+    retries: 3
+
+# Alert rules
+rules:
+  # High-value anomaly
+  high_value_anomaly:
+    enabled: true
+    conditions:
+      - "anomaly_score > 0.8"
+      - "amount > 5000"
+    action: "immediate_alert"
+    
+  # Rapid transactions
+  rapid_transactions:
+    enabled: true
+    conditions:
+      - "transaction_count_1h > 10"
+      - "anomaly_score > 0.7"
+    action: "rate_limit_user"
+    
+  # Unusual location
+  unusual_location:
+    enabled: true
+    conditions:
+      - "location_distance_km > 500"
+      - "anomaly_score > 0.6"
+    action: "location_verification"
+    
+  # Unusual time pattern
+  unusual_time:
+    enabled: true
+    conditions:
+      - "hour < 6 or hour > 22"
+      - "anomaly_score > 0.7"
+    action: "time_verification"
+
+# Alert aggregation
+aggregation:
+  # Group alerts by user within time window
+  group_by_user: true
+  time_window_minutes: 60
+  
+  # Maximum alerts per user per hour
+  max_alerts_per_user: 5
+  
+  # Cooldown period between alerts (minutes)
+  cooldown_period: 30
+
+# Alert storage
+storage:
+  # Database table for alerts
+  table_name: "alerts"
+  
+  # Retention period (days)
+  retention_days: 90
+  
+  # Archive old alerts
+  archive_enabled: true
+  archive_after_days: 30
+
+# Dashboard settings
+dashboard:
+  # Real-time updates
+  real_time_enabled: true
+  update_interval_seconds: 30
+  
+  # Alert display
+  max_alerts_displayed: 100
+  auto_refresh: true
+  
+  # Charts and metrics
+  show_metrics: true
+  show_trends: true
+  show_geographic_data: true
+
+# Integration settings
+integrations:
+  # External fraud detection systems
+  external_systems:
+    enabled: false
+    api_endpoint: "${EXTERNAL_FRAUD_API}"
+    api_key: "${EXTERNAL_API_KEY}"
+    
+  # Risk scoring integration
+  risk_scoring:
+    enabled: true
+    weight: 0.3  # Weight in final score calculation
+    
+  # User behavior analysis
+  behavior_analysis:
+    enabled: true
+    lookback_days: 30
+    baseline_period_days: 7

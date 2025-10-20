@@ -1,0 +1,94 @@
+# Main configuration for anomaly detection project
+
+# Application settings
+app:
+  name: "Transaction Anomaly Detection"
+  version: "1.0.0"
+  debug: false
+  host: "0.0.0.0"
+  port: 8000
+
+# Database configuration
+database:
+  type: "sqlite"
+  path: "data/transactions.db"
+  # For PostgreSQL/MySQL, use:
+  # host: "localhost"
+  # port: 5432
+  # username: "user"
+  # password: "password"
+  # database: "anomaly_db"
+
+# API configuration
+api:
+  title: "Anomaly Detection API"
+  description: "API for detecting anomalous transactions"
+  version: "1.0.0"
+  docs_url: "/docs"
+  redoc_url: "/redoc"
+  cors_origins: ["*"]
+  rate_limit: 100  # requests per minute
+
+# Streamlit configuration
+streamlit:
+  page_title: "Anomaly Detection Dashboard"
+  page_icon: "🔍"
+  layout: "wide"
+  initial_sidebar_state: "expanded"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}"
+  file: "logs/anomaly_detection.log"
+  rotation: "1 day"
+  retention: "30 days"
+
+# Data paths
+paths:
+  data_dir: "data"
+  models_dir: "data/models"
+  logs_dir: "logs"
+  config_dir: "configs"
+  
+# Feature engineering
+features:
+  numerical:
+    - "amount_log"
+    - "location_distance_km"
+    - "time_since_last_transaction_minutes"
+    - "hour"
+    - "day_of_week"
+    - "transaction_count_1h"
+    - "total_amount_24h"
+    - "is_online"
+    - "is_weekend"
+  
+  categorical:
+    - "merchant_category"
+  
+  target: "is_anomaly"
+
+# Preprocessing
+preprocessing:
+  scaler: "StandardScaler"
+  handle_missing: "zero_fill"
+  encode_categorical: true
+
+# Model serving
+serving:
+  batch_size: 1000
+  timeout: 30  # seconds
+  max_retries: 3
+
+# Monitoring
+monitoring:
+  enable_metrics: true
+  metrics_endpoint: "/metrics"
+  health_check_endpoint: "/health"
+  
+# Security
+security:
+  api_key_header: "X-API-Key"
+  rate_limit_per_minute: 100
+  enable_cors: true

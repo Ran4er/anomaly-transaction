@@ -1,0 +1,47 @@
+data:
+  train_path: "data/raw/train.csv"
+  val_path: "data/raw/val.csv"
+  test_path: "data/raw/test.csv"
+  output_dir: "data/processed"
+
+isolation_forest:
+  n_estimators: 100
+  max_samples: "auto"
+  contamination: 0.05
+  max_features: 1.0
+  bootstrap: false
+  n_jobs: -1
+  random_state: 42
+
+autoencoder:
+  hidden_dims: [32, 16, 8]
+  batch_size: 256
+  epochs: 50
+  learning_rate: 0.001
+  random_state: 42
+
+ensemble:
+  weights: [0.5, 0.5]  # [isolation_forest, autoencoder]
+  method: "weighted_average"
+
+training:
+  random_state: 42
+  test_size: 0.15
+  val_size: 0.15
+  
+evaluation:
+  metrics:
+    - precision
+    - recall
+    - f1_score
+    - roc_auc
+    - precision_at_k
+  k_values: [1, 5, 10]
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "anomaly_detection"
+
+model_registry:
+  model_name: "transaction_anomaly_detector"
+  model_path: "data/models"
